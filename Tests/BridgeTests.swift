@@ -1,0 +1,70 @@
+import Foundation
+import CoreAudio
+@main struct Tests {
+    static func main()throws {
+        let key="local.ADI2Native.Tests.\(UUID())", defaults=UserDefaults(suiteName:key)!
+        defer { defaults.removePersistentDomain(forName:key) }
+        let settings=Settings(defaults), clock=Clock(), midi=FakeMIDI(), audio=FakeAudio()
+        let b=try Bridge(midi:midi,audio:audio,settings:settings,now:{clock.time},startTimer:false)
+        assert(b.synchronized && !b.enabled && midi.writes.isEmpty)
+        try b.enable(); assert(b.enabled && audio.gate && audio.normal==2 && settings.wanted)
+        audio.scalar=VolumeRange().scalar(-20); b.tick()
+        assert(midi.state[3]?[12] == -200)
+        midi.hardware(3,12,-150); assert(abs(audio.scalar-VolumeRange().scalar(-15))<0.0001)
+        // Unrelated MIDI topology changes do not disturb the route.
+        b.topologyChanged(); assert(b.enabled)
+        // Device IDs may change across unplug/replug; match persistent UIDs, not old IDs.
+        midi.present=false; audio.available=false; b.topologyChanged()
+        assert(!b.enabled && b.wanted && !audio.gate)
+        clock.time += 4; b.tick(); assert(!b.enabled)
+        midi.present=true; audio.available=true; audio.deviceID=11; clock.time += 4; b.tick()
+        assert(b.enabled && audio.normal==2 && midi.state[3]?[12] == -150)
+        b.willSleep(); assert(!audio.gate && b.wanted)
+        clock.time += 120; b.tick(); assert(!b.enabled)
+        b.didWake(); b.tick(); assert(b.enabled)
+        // Setting a ceiling only lowers hardware volume, never raises it.
+        try b.setRange(VolumeRange(minimum:-60,maximum:-25)); assert(midi.state[3]?[12] == -250)
+        clock.time += 1; b.tick(); assert(audio.gate)
+        midi.hardware(3,12,-100); assert(midi.state[3]?[12] == -250)
+        midi.hardware(3,12,-900); assert(audio.scalar>0 && midi.state[3]?[12] == -900)
+        try b.setMuted(true); b.tick(); assert(midi.state[3]?[15] == 1 && midi.state[3]?[12] == -900)
+        try b.setMuted(false); b.tick(); assert(midi.state[3]?[15] == 0 && midi.state[3]?[12] == -900)
+        // User switching to another output cancels restoration.
+        audio.normal=3; b.tick(); assert(!b.enabled && !b.wanted && audio.normal==3)
+        try b.enable(); b.willSleep(); audio.normal=3; b.didWake(); b.tick(); assert(!b.enabled && !b.wanted && audio.normal==3)
+        try b.enable(); b.select(channel:6); assert(b.enabled && b.channel==6 && midi.state[6]?[12] == -300)
+        b.shutdown(); assert(settings.wanted && audio.normal==3)
+        let b2=try Bridge(midi:midi,audio:audio,settings:settings,now:{clock.time},startTimer:false)
+        b2.tick(); assert(b2.enabled && b2.channel==6)
+        b2.disable(); assert(!settings.wanted)
+        // Missing acknowledgement is a failure; never keep renewing a stale gain lease.
+        try b2.enable(); midi.acknowledge=false; audio.scalar=0.4; b2.tick()
+        clock.time+=2.6; b2.tick(); assert(!b2.wanted && !audio.gate)
+        assert(!VolumeRange(minimum:-10,maximum:-12).valid)
+        assert(!VolumeRange(minimum:.nan,maximum:0).valid)
+        // A quiet connected DAC stays synchronized via read-only polling.
+        midi.acknowledge=true;b2.disable();try b2.requestSettings();try b2.enable()
+        for _ in 0..<600 { clock.time += 0.5;b2.tick();assert(b2.enabled && b2.synchronized && audio.gate) }
+        // A failure remains visible even after healthy state packets return.
+        midi.acknowledge=false;audio.scalar=0.35;b2.tick();clock.time += 2.6;b2.tick()
+        assert(b2.failureMessage != nil)
+        midi.acknowledge=true;midi.snapshot();assert(b2.failureMessage != nil && b2.controlSummary.contains("需要處理"))
+        b2.disable();assert(b2.failureMessage == nil)
+        // Range failures must stop renewal and retain the last accepted mapping.
+        for volumeFailure in [false,true] {
+            b2.disable();try b2.enable()
+            let saved=b2.range
+            audio.failRange = !volumeFailure;audio.failVolume=volumeFailure
+            do { try b2.setRange(VolumeRange(minimum:-80,maximum:-60));assertionFailure("expected failure") } catch {}
+            assert(!b2.enabled && !b2.wanted && !audio.gate && b2.range==saved && b2.failureMessage != nil)
+            audio.failRange=false;audio.failVolume=false
+            for _ in 0..<8 {clock.time += 0.5;b2.tick();assert(!audio.gate && !b2.enabled)}
+        }
+        // Asynchronous HAL errors must reach the UI and release the route.
+        try b2.enable();audio.playbackError=true;clock.time += 1.1;b2.tick()
+        assert(!b2.enabled && !b2.wanted && !audio.gate && b2.failureMessage != nil)
+        audio.playbackError=false;try b2.enable();clock.time += 1.1;b2.tick();assert(b2.enabled && audio.gate)
+        print("PASS: range configuration/scalar failures stop renewal and roll back preferences; driver failure stops control; explicit retry recovers")
+        print("PASS: startup/handshake, two-way volume, unrelated topology, reconnect with new IDs, sleep/wake, ceiling, mute without gain jump, manual routing, target persistence, restart, acknowledgement timeout")
+    }
+}
