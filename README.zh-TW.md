@@ -6,7 +6,7 @@
 
 ## 目前狀態
 
-App **0.4.1**、HAL 驅動 **0.2.2**。目前為本機開發版本，尚未 Apple 公證，也尚未宣稱正式 1.0。七組自動測試通過；最新版的最終安裝及實機驗證仍待完成。
+App **0.4.1**、HAL 驅動 **0.2.2**。2026-09-26 的 DMG 已完成 Developer ID 簽署、Apple 公證及 Gatekeeper 驗證，尚未宣稱正式 1.0。七組自動測試通過；最新版的最終安裝及實機驗證仍待完成。
 
 需要 Apple Silicon Mac、Xcode Command Line Tools，以及透過 USB 連接的一台 ADI-2 DAC。編譯目標為 macOS 13 以上，實機測試環境為 macOS 27；其他版本尚未完整驗證。Pro／2/4 Pro 不在支援範圍。
 
@@ -36,3 +36,33 @@ cd adi2-native
 - 跨機器長時間播放、拔插及睡眠喚醒仍需更多驗證。
 
 原創程式採 [MIT](LICENSE)，第三方授權見 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。本專案與 RME、Apple 無隸屬或背書關係。
+
+## Developer ID 簽署與公證
+
+本機建置預設維持 ad-hoc 簽署。正式發佈使用：
+
+```sh
+export ADI2_SIGN_IDENTITY='Developer ID Application: YOUR NAME (TEAM_ID)'
+./Scripts/release.sh
+```
+
+此流程對 App、HAL 驅動啟用 Hardened Runtime 與安全時間戳記，建立
+`build/release/ADI2-Native.dmg`，包含安裝／解除安裝工具與授權說明。
+未設定公證認證時只產生簽署版本，不能宣稱已通過 Apple 公證。
+
+首次公證前，在自己的終端機互動設定認證（不要把密碼寫入腳本或版本庫）：
+
+```sh
+xcrun notarytool store-credentials adi2-notary --apple-id YOUR_APPLE_ID --team-id YOUR_TEAM_ID
+```
+
+依提示輸入 Apple 帳號網站產生的 App 專用密碼，然後執行：
+
+```sh
+ADI2_NOTARY_PROFILE=adi2-notary ./Scripts/release.sh
+```
+
+腳本只有在 Apple 回報 Accepted 後才附加公證票證，並檢查票證及 Gatekeeper。
+公證不代表驅動的實機相容性測試已完成；發佈前仍須驗證安裝、播放及睡眠喚醒。
+
+目前 DMG 仍採資料夾式封裝，包含 `.command` 安裝工具；圖形化 `.pkg` 安裝程式尚未完成。

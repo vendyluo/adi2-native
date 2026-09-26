@@ -35,7 +35,7 @@ cd adi2-native
 ./Scripts/test.sh
 ```
 
-Icons are generated locally by `Scripts/render-icons.swift`. The build uses ad-hoc signing; binaries are not Apple-notarized.
+Icons are generated locally by `Scripts/render-icons.swift`. Local builds use ad-hoc signing by default. The DMG prepared on 2026-09-26 passed Developer ID signing, Apple notarization, and Gatekeeper validation. `Scripts/release.sh` supports signed and notarized releases; see the signing section in README.zh-TW.md. The DMG currently contains a folder with command-based installation tools; a graphical PKG installer is still pending.
 
 ## Install and use
 

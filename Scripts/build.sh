@@ -24,8 +24,14 @@ PY
 mkdir -p build/ADI2Native.driver/Contents/Resources
 cp Vendor/proxyAudioDevice/DeviceIcon.icns build/ADI2Native.driver/Contents/Resources/
 xcrun swiftc -swift-version 5 -O -target arm64-apple-macos13.0 -module-cache-path "$ADI2_CACHE" Sources/*.swift -o 'build/ADI2 Native.app/Contents/MacOS/ADI2Native'
-codesign --force --sign - build/ADI2Native.driver
-codesign --force --sign - 'build/ADI2 Native.app'
+# Local builds remain ad-hoc; release builds supply a Developer ID identity.
+ADI2_IDENTITY="${ADI2_SIGN_IDENTITY:--}"
+sign_options=(--force --sign "$ADI2_IDENTITY")
+if [[ "$ADI2_IDENTITY" != "-" ]]; then
+ sign_options+=(--options runtime --timestamp)
+fi
+codesign "${sign_options[@]}" build/ADI2Native.driver
+codesign "${sign_options[@]}" 'build/ADI2 Native.app'
 
 codesign --verify --strict build/ADI2Native.driver
 codesign --verify --strict 'build/ADI2 Native.app'
